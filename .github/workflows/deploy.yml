@@ -7,54 +7,95 @@ on:
   pull_request:
     branches:
       - main
+
+  # Manual trigger for APPLY or DESTROY
   workflow_dispatch:
     inputs:
-      destroy:
-        description: "Run Terraform Destroy?"
-        required: false
-        default: "false"
+      action:
+        description: "Choose Terraform Action"
+        required: true
         type: choice
         options:
-          - "false"
-          - "true"
+          - plan
+          - apply
+          - destroy
 
 jobs:
   terraform:
+    name: "Terraform Pipeline"
     runs-on: ubuntu-latest
+
     env:
-      AWS_REGION: 'us-east-1'
-      TF_VERSION: '1.4.0'
+      AWS_REGION: "us-east-1"
+      TF_VERSION: "1.4.0"
 
     steps:
-    - name: 'Checkout GitHub repository'
-      uses: actions/checkout@v2
 
-    - name: 'Configure AWS credentials'
-      uses: aws-actions/configure-aws-credentials@v1
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: ${{ env.AWS_REGION }}
+      # -----------------------
+      # Checkout Code
+      # -----------------------
+      - name: Checkout Repository
+        uses: actions/checkout@v3
 
-    - name: 'Set up Terraform'
-      uses: hashicorp/setup-terraform@v1
-      with:
-        terraform_version: ${{ env.TF_VERSION }}
+      # -----------------------
+      # AWS Credentials
+      # -----------------------
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
 
-    - name: 'Terraform Init'
-      run: terraform init
+      # -----------------------
+      # Terraform Setup
+      # -----------------------
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
 
-    - name: 'Terraform Format'
-      run: terraform fmt
+      # -----------------------
+      # Terraform Init
+      # -----------------------
+      - name: Terraform Init
+        run: terraform init -input=false
 
-    - name: 'Terraform Validate'
-      run: terraform validate
+      # -----------------------
+      # Terraform Format
+      # -----------------------
+      - name: Terraform Format
+        run: terraform fmt -check
 
-    - name: 'Terraform Plan'
-      run: terraform plan -out=tfplan
+      # -----------------------
+      # Terraform Validate
+      # -----------------------
+      - name: Terraform Validate
+        run: terraform validate
 
-    - name: 'Terraform Destroy'
-      if: github.event_name == 'workflow_dispatch' && github.event.inputs.destroy == 'true'
-      run: |
-        terraform plan -destroy -out=tfplan.destroy
-        terraform apply -auto-approve tfplan.destroy
+      # -----------------------
+      # Terraform Plan (Default for push/PR)
+      # -----------------------
+      - name: Terraform Plan
+        if: github.event_name != 'workflow_dispatch' || github.event.inputs.action == 'plan'
+        run: terraform plan -out=tfplan
+
+      # -----------------------
+      # Terraform Apply (Manual or main branch)
+      # -----------------------
+      - name: Terraform Apply
+        if: >
+          (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply')
+          || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+        run: terraform apply -auto-approve tfplan
+
+      # -----------------------
+      # Terraform Destroy (Manual Only)
+      # -----------------------
+      - name: Terraform Plan Destroy
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'destroy'
+        run: terraform plan -destroy -out=tfplan.destroy
+
+      - name: Terraform Destroy
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'destroy'
+        run: terraform apply -auto-approve tfplan.destroy
