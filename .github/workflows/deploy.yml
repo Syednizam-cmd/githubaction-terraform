@@ -7,12 +7,20 @@ on:
   pull_request:
     branches:
       - main
+  workflow_dispatch:
+    inputs:
+      destroy:
+        description: "Run Terraform Destroy?"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
 
 jobs:
   terraform:
-    name: 'Terraform Lint, Security Check, and Deploy'
     runs-on: ubuntu-latest
-
     env:
       AWS_REGION: 'us-east-1'
       TF_VERSION: '1.4.0'
@@ -33,7 +41,6 @@ jobs:
       with:
         terraform_version: ${{ env.TF_VERSION }}
 
-
     - name: 'Terraform Init'
       run: terraform init
 
@@ -43,11 +50,11 @@ jobs:
     - name: 'Terraform Validate'
       run: terraform validate
 
-
     - name: 'Terraform Plan'
       run: terraform plan -out=tfplan
 
-      
     - name: 'Terraform Destroy'
-      if: github.ref == 'refs/heads/destroy'
-      run: terraform destroy -auto-approve
+      if: github.event_name == 'workflow_dispatch' && github.event.inputs.destroy == 'true'
+      run: |
+        terraform plan -destroy -out=tfplan.destroy
+        terraform apply -auto-approve tfplan.destroy
